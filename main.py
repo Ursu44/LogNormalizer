@@ -1,145 +1,12 @@
 from kafka import KafkaConsumer
 import json
-import re
 import time
 import hashlib
-from collections import defaultdict, Counter, deque
 from datetime import datetime
+from tokenizer import *
+from templateTree import TemplateTree
+from cluster import Cluster
 
-# =========================================================
-# REGEX
-# =========================================================
-IP = re.compile(r"\d+\.\d+\.\d+\.\d+")
-NUMBER = re.compile(r"^\d+$")
-ISO_TS = re.compile(r"^\d{4}-\d{2}-\d{2}T")
-SYSLOG_TS = re.compile(r"^[A-Z][a-z]{2}\s+\d{1,2}")
-URL = re.compile(r"^(https?://)?([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}")
-FILENAME = re.compile(r".+\.(exe|txt|docx|pptx|pdf|sh|bat|ps1)$")
-
-# =========================================================
-# TEMPLATE
-# =========================================================
-class Template:
-    def __init__(self, tokens):
-        self.tokens = tokens[:]
-        self.count = 1
-        self.samples = defaultdict(Counter)
-
-    def update(self, shaped, raw):
-        generalized = False
-        new_tokens = []
-
-        for i, (a, b) in enumerate(zip(shaped, self.tokens)):
-            if a == b:
-                new_tokens.append(b)
-            else:
-                new_tokens.append("<*>")
-                generalized = True
-                self.samples[i][raw[i]] += 1
-
-        self.tokens = new_tokens
-        self.count += 1
-        return generalized
-
-# =========================================================
-# TOKENIZATION
-# =========================================================
-def token_shape(tok):
-    if IP.fullmatch(tok):
-        return "<*>"
-    if NUMBER.fullmatch(tok):
-        return "<*>"
-    if "=" in tok:
-        return "<*>"
-    if "[" in tok and "]" in tok:
-        return "<*>"
-    if URL.fullmatch(tok):
-        return "<*>"
-    if FILENAME.fullmatch(tok):
-        return "<filename>"
-    return tok
-
-def timestamp_type(log):
-    if ISO_TS.match(log):
-        return "ISO"
-    if SYSLOG_TS.match(log):
-        return "SYSLOG"
-    return "NONE"
-
-def tokenize(log, shaped=True):
-    ts = timestamp_type(log)
-    tokens = log.split()
-
-    if ts == "SYSLOG":
-        tokens = tokens[3:]
-    elif ts == "ISO":
-        tokens = tokens[1:]
-
-    return [token_shape(t) if shaped else t for t in tokens]
-
-# =========================================================
-# TEMPLATE TREE
-# =========================================================
-class TemplateNode:
-    def __init__(self):
-        self.children = {}
-        self.wildcard = None
-        self.template = None
-
-class TemplateTree:
-    def __init__(self):
-        self.root = TemplateNode()
-
-    def match_or_insert(self, shaped, raw):
-        node = self.root
-        for tok in shaped:
-            if tok in node.children:
-                node = node.children[tok]
-            elif node.wildcard:
-                node = node.wildcard
-            else:
-                new = TemplateNode()
-                if tok == "<*>":
-                    node.wildcard = new
-                else:
-                    node.children[tok] = new
-                node = new
-        if node.template:
-            gen = node.template.update(shaped, raw)
-            return node.template, False, gen
-        tpl = Template(shaped)
-        for i, t in enumerate(shaped):
-            if t == "<*>":
-                tpl.samples[i][raw[i]] += 1
-        node.template = tpl
-        return tpl, True, False
-
-# =========================================================
-# CLUSTERING
-# =========================================================
-class Cluster:
-    def __init__(self, tpl):
-        self.templates = [tpl]
-
-    def try_add(self, tpl, threshold=0.7):
-        base = self.templates[0].tokens
-        matches = sum(
-            1 for a, b in zip(base, tpl.tokens)
-            if a == b or a == "<*>" or b == "<*>"
-        )
-        if matches / max(len(base), len(tpl.tokens)) >= threshold:
-            self.templates.append(tpl)
-            return True
-        return False
-
-    def __str__(self):
-        out = []
-        max_len = max(len(t.tokens) for t in self.templates)
-        for i in range(max_len):
-            vals = [t.tokens[i] for t in self.templates if i < len(t.tokens)]
-            tok, cnt = Counter(vals).most_common(1)[0]
-            out.append(tok if cnt / len(vals) > 0.5 else "<*>")
-        return " ".join(out)
 
 clusters = []
 
@@ -160,21 +27,6 @@ def normalize_sample(s):
         return k.lower(), v
     return None, s
 
-SEMANTIC_RULES = {
-    "<user>": lambda k, v: k in {"user", "username", "account"},
-    "<process>": lambda k, v: k == "process" or v.endswith(".exe"),
-    "<src_ip>": lambda k, v: IP.fullmatch(v) is not None,
-    "<path>": lambda k, v: v.startswith("/"),
-    "<request_id>": lambda k, v: k in {"request_id", "req_id"},
-    "<url>": lambda k, v: URL.fullmatch(v) is not None,
-    "<filename>": lambda k, v: FILENAME.fullmatch(v) is not None
-}
-
-SEMANTIC_CANONICAL = {
-    "<ip>": "<src_ip>",
-    "<username>": "<user>",
-    "<account>": "<user>",
-}
 
 def infer_semantic(samples):
     votes = Counter()
@@ -243,10 +95,6 @@ def temporal_features(state, now=None):
 # =========================================================
 # ETAPA 3.3 – BEHAVIORAL FEATURES
 # =========================================================
-USER_STATE = defaultdict(lambda: {"timestamps": deque(), "ips": Counter(), "processes": Counter()})
-IP_STATE = defaultdict(lambda: {"users": Counter()})
-TEMPLATE_TRANSITIONS = defaultdict(Counter)
-LAST_TEMPLATE_PER_USER = {}
 
 def extract_entities(tpl):
     entities = []
@@ -322,7 +170,6 @@ def behavioral_features(tpl, tid, now=None):
 # =========================================================
 # TIMESTAMP PARSING
 # =========================================================
-MONTHS = {m: i for i, m in enumerate(["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"],1)}
 def parse_timestamp(log):
     ts_type = timestamp_type(log)
     if ts_type == "ISO":
