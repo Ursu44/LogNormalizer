@@ -30,3 +30,5 @@ TEMPLATE_TRANSITIONS = defaultdict(Counter)
 LAST_TEMPLATE_PER_USER = {}
 
 MONTHS = {m: i for i, m in enumerate(["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"],1)}
+
+TEMPORAL_STATE = defaultdict(lambda: {"timestamps": deque(), "first_seen": None, "last_seen": None})
