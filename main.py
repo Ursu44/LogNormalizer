@@ -1,4 +1,4 @@
-from kafka import KafkaConsumer
+from kafka import KafkaConsumer, KafkaProducer
 import json
 import hashlib
 from datetime import datetime
@@ -61,17 +61,19 @@ def process(log):
     features = {**temporal, **behavioral, "timestamp": ts_numeric, "template_id": tid, "cluster": str(cluster)}
     return key, tpl, cluster, is_new, gen, tid, features
 
-# =========================================================
-# KAFKA
-# =========================================================
+
 consumer = KafkaConsumer(
     "logs",
-    bootstrap_servers="localhost:29092",
+    bootstrap_servers="kafka:9092",
     auto_offset_reset="earliest",
     group_id=None,
 )
 
-print("\n📡 Listening for logs...\n")
+producer = KafkaProducer(
+    bootstrap_servers="kafka:9092",
+    value_serializer=lambda v: json.dumps(v).encode("utf-8")
+)
+
 
 for msg in consumer:
     raw_msg = msg.value.decode(errors="ignore")
@@ -83,8 +85,7 @@ for msg in consumer:
 
     key, tpl, cluster, is_new, gen, tid, features = process(log)
 
-    # Gata de ML
-    print(json.dumps({
+    event = {
         "log": log,
         "syntax_key": key,
         "template": " ".join(tpl.tokens),
@@ -93,4 +94,7 @@ for msg in consumer:
         "is_new": is_new,
         "generalized": gen,
         "features": features
-    }, indent=2))
+    }
+
+    producer.send("logs_normalized", event)
+    producer.flush()
