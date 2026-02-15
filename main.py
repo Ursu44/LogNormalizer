@@ -85,7 +85,7 @@ for msg in consumer:
 
     key, tpl, cluster, is_new, gen, tid, features = process(log)
 
-    print("Sending normaized logs")
+    print("Sending normaized logs to Kafka producer")
     event = {
         "log": log,
         "syntax_key": key,
