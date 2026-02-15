@@ -74,7 +74,7 @@ producer = KafkaProducer(
     value_serializer=lambda v: json.dumps(v).encode("utf-8")
 )
 
-print("Connected to Kafka")
+print("Connected to Kafka", flush=True)
 
 for msg in consumer:
     raw_msg = msg.value.decode(errors="ignore")
@@ -86,7 +86,7 @@ for msg in consumer:
 
     key, tpl, cluster, is_new, gen, tid, features = process(log)
 
-    print("Sending normaized logs to Kafka producer")
+    print("Sending normaized logs to Kafka producer", flush=True)
     event = {
         "log": log,
         "syntax_key": key,
