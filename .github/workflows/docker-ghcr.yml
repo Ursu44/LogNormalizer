@@ -1,0 +1,22 @@
+name: Build & Push Docker image to GHCR
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to GHCR
+        run: echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u ursu44 --password-stdin
+
+      - name: Build & Push log-normalizer
+        run: |
+          docker build -t ghcr.io/ursu44/log-normalizer:latest ./log-normalizer
+          docker push ghcr.io/ursu44/log-normalizer:latest
