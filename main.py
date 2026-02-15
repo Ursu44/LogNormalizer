@@ -74,6 +74,7 @@ producer = KafkaProducer(
     value_serializer=lambda v: json.dumps(v).encode("utf-8")
 )
 
+print("Connected to Kafka")
 
 for msg in consumer:
     raw_msg = msg.value.decode(errors="ignore")
